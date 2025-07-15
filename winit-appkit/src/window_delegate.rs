@@ -879,67 +879,28 @@ impl WindowDelegate {
 
     #[track_caller]
     pub(super) fn view(&self) -> Retained<WinitView> {
-        // 首次尝试获取视图
-        let content_view = match self.window().contentView() {
-        Some(view) => view,
-        None => {
-            println!("view is none,尝试恢复...");
-            // 尝试恢复：使用现有方法重建视图
-            let app_state = &self.ivars().app_state;
-            let macos_attrs = WindowAttributesMacOS::default(); // 使用默认值
-            let mtm = MainThreadMarker::from(self);
-            
-            // 完全基于现有代码中的 re_render 逻辑
-            let new_view = WinitView::new(
-                app_state,
-                macos_attrs.accepts_first_mouse,
-                macos_attrs.option_as_alt,
-                mtm,
-            );
-            
-            // 设置新视图
-            self.window().setContentView(Some(&new_view));
-            self.window().setInitialFirstResponder(Some(&new_view));
-            
-            // 重新配置视图以发送通知
-            new_view.setPostsFrameChangedNotifications(true);
-            let notification_center = unsafe { NSNotificationCenter::defaultCenter() };
-            unsafe {
-                notification_center.addObserver_selector_name_object(
-                    &new_view,
-                    sel!(viewFrameDidChangeNotification:),
-                    Some(NSViewFrameDidChangeNotification),
-                    Some(&new_view),
-                )
-            }
-            
-            // 再次尝试获取视图
-            self.window().contentView()
-                .expect("恢复后视图仍为空")
-        }
-    };
-    
-    // 尝试类型转换
-    match content_view.downcast() {
-        Ok(view) => view,
-        Err(_) => {
-            println!("视图类型转换失败，尝试恢复...");
-            
-            // 尝试恢复：重置视图并重新获取（逻辑同上）
-            let app_state = &self.ivars().app_state;
+        // ---------- 第 1 次尝试 ----------
+        let mut content_view = self.window().contentView();
+
+        // 若第一次就拿不到视图，立即进行一次恢复
+        if content_view.is_none() {
+            println!("[view] contentView = None，尝试重建一次…");
+
+            // === 重建逻辑（与原代码相同） ===
+            let app_state   = &self.ivars().app_state;
             let macos_attrs = WindowAttributesMacOS::default();
-            let mtm = MainThreadMarker::from(self);
-            
+            let mtm         = MainThreadMarker::from(self);
+
             let new_view = WinitView::new(
                 app_state,
                 macos_attrs.accepts_first_mouse,
                 macos_attrs.option_as_alt,
                 mtm,
             );
-            
+
             self.window().setContentView(Some(&new_view));
             self.window().setInitialFirstResponder(Some(&new_view));
-            
+
             new_view.setPostsFrameChangedNotifications(true);
             let notification_center = unsafe { NSNotificationCenter::defaultCenter() };
             unsafe {
@@ -950,15 +911,25 @@ impl WindowDelegate {
                     Some(&new_view),
                 )
             }
-            
-            // 再次尝试类型转换
-            self.window().contentView()
-                .expect("重置后视图仍为空")
-                .downcast()
-                .expect("重置后视图类型转换失败")
+            // === 重建完毕 ===
+
+            // 更新 content_view 供后续 downcast
+            content_view = self.window().contentView();
+        }
+
+        // 此时 content_view 一定是 Some，否则 panic（最多只尝试一次）
+        let content_view = content_view.expect("[view] 重建后 contentView 仍为 None");
+
+        // ---------- downcast ----------
+        match content_view.downcast::<WinitView>() {
+            Ok(view) => view,
+            Err(_) => {
+                // 只允许重建一次；若 downcast 仍失败则 panic
+                panic!("[view] 重建后 downcast::<WinitView>() 仍失败 —— 放弃重试");
             }
         }
     }
+
 
     #[track_caller]
     pub(super) fn window(&self) -> &NSWindow {
