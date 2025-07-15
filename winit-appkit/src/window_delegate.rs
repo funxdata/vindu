@@ -351,11 +351,17 @@ define_class!(
             use std::path::PathBuf;
 
             let pb = unsafe { sender.draggingPasteboard() };
-            let filenames = pb
-                .propertyListForType(unsafe { NSFilenamesPboardType })
-                .unwrap()
-                .downcast::<NSArray>()
-                .unwrap();
+            let filetypenames_res = pb
+                .propertyListForType(unsafe { NSFilenamesPboardType });
+            if filetypenames_res.is_none() {
+                return false.into();
+            }
+            let filetypenames =filetypenames_res.unwrap();
+            let filenames_res = filetypenames.downcast::<NSArray>();
+             if filenames_res.is_err() {
+                return false.into();
+            }
+            let filenames = filenames_res.unwrap();
             let paths = filenames
                 .into_iter()
                 .map(|file| PathBuf::from(file.downcast::<NSString>().unwrap().to_string()))
